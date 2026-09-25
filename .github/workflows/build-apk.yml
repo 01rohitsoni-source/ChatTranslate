@@ -11,27 +11,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract project
         run: |
+          rm -rf project
           mkdir project
           unzip -q ChatTranslate_Kazakh_Android_MVP.zip -d project
 
-          SETTINGS_FILE=$(find project -name "gradle.properties" | head -n 1)
+      - name: Find Android project
+        run: |
+          SETTINGS_FILE=$(find project -type f -name "settings.gradle" | head -n 1)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            PROJECT_DIR=$(find project -name "settings.gradle" -o -name "settings.gradle.kts" | head -n 1 | xargs dirname)
-            SETTINGS_FILE="$PROJECT_DIR/gradle.properties"
-            touch "$SETTINGS_FILE"
+            SETTINGS_FILE=$(find project -type f -name "settings.gradle.kts" | head -n 1)
           fi
 
-          echo "android.useAndroidX=true" >> "$SETTINGS_FILE"
-          echo "android.enableJetifier=true" >> "$SETTINGS_FILE"
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "Android project not found"
+            find project -maxdepth 4 -type f | head -100
+            exit 1
+          fi
 
-          echo "Using gradle.properties:"
-          cat "$SETTINGS_FILE"
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -42,61 +51,62 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          cmdline-tools-version: '15859902'
+          cmdline-tools-version: '12266719'
 
       - name: Install Android SDK
         run: |
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
 
-      - name: Find Android project
+      - name: Configure AndroidX and JVM
         run: |
-          SETTINGS_FILE=$(find project -name "settings.gradle" -o -name "settings.gradle.kts" | head -n 1)
+          echo "android.useAndroidX=true" >> "$PROJECT_DIR/gradle.properties"
+          echo "android.enableJetifier=true" >> "$PROJECT_DIR/gradle.properties"
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "Android Gradle project not found"
-            find project -maxdepth 5 -type f | head -100
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
-
-      - name: Configure JVM 17
-        run: |
-          APP_GRADLE=$(find "$PROJECT_DIR" -path "*/app/build.gradle" | head -n 1)
+          APP_GRADLE=$(find "$PROJECT_DIR" -type f -path "*/app/build.gradle" | head -n 1)
 
           if [ -z "$APP_GRADLE" ]; then
-            echo "app/build.gradle not found"
-            find "$PROJECT_DIR" -type f
-            exit 1
+            APP_GRADLE=$(find "$PROJECT_DIR" -type f -path "*/app/build.gradle.kts" | head -n 1)
           fi
 
-          cat >> "$APP_GRADLE" <<'EOF'
+          echo "APP_GRADLE=$APP_GRADLE"
 
-          tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
+          if grep -q "android {" "$APP_GRADLE"; then
+            cat >> "$APP_GRADLE" <<'EOF'
 
-          android {
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-          EOF
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
 
-          echo "Updated:"
-          cat "$APP_GRADLE"
+android {
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+EOF
+          fi
+
+      - name: Fix OkHttp imports
+        run: |
+          IME_FILE=$(find "$PROJECT_DIR" -type f -name "TranslateIME.kt" | head -n 1)
+
+          if [ -n "$IME_FILE" ]; then
+            sed -i '/import okhttp3.MediaType.Companion.toMediaType/d' "$IME_FILE"
+            sed -i '/import okhttp3.RequestBody.Companion.toRequestBody/d' "$IME_FILE"
+
+            sed -i '/import okhttp3.OkHttpClient/a import okhttp3.MediaType.Companion.toMediaType\nimport okhttp3.RequestBody.Companion.toRequestBody' "$IME_FILE"
+
+            echo "Fixed imports in:"
+            echo "$IME_FILE"
+          fi
 
       - name: Build APK
         run: |
@@ -104,4 +114,17 @@ jobs:
 
       - name: Find APK
         run: |
-          APK=$(find "$PROJECT_DIR" -type f -name "app-debug.apk" | head
+          APK=$(find "$PROJECT_DIR" -type f -name "app-debug.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK not found"
+            exit 1
+          fi
+
+          echo "APK found at:"
+          echo "$APK"
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses:
