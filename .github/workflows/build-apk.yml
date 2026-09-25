@@ -39,12 +39,35 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Find Android project
+        run: |
+          SETTINGS_FILE=$(find project -name "settings.gradle" -o -name "settings.gradle.kts" | head -n 1)
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "Android Gradle project not found"
+            find project -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found Android project at: $PROJECT_DIR"
+
       - name: Build APK
-        working-directory: project/ChatTranslateKeyboard
-        run: gradle assembleDebug --no-daemon
+        run: |
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon
+
+      - name: Find APK
+        run: |
+          APK=$(find "$PROJECT_DIR" -type f -name "app-debug.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "APK not found"
+            find "$PROJECT_DIR" -type f | tail -100
+            exit 1
+          fi
+          echo "Found APK: $APK"
+          cp "$APK" ChatTranslate.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ChatTranslate-debug
-          path: project/ChatTranslateKeyboard/app/build/outputs/apk/debug/app-debug.apk
+          path: ChatTranslate.apk
