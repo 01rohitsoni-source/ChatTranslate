@@ -56,14 +56,47 @@ jobs:
       - name: Find Android project
         run: |
           SETTINGS_FILE=$(find project -name "settings.gradle" -o -name "settings.gradle.kts" | head -n 1)
+
           if [ -z "$SETTINGS_FILE" ]; then
             echo "Android Gradle project not found"
-            find project -maxdepth 4 -type f | head -100
+            find project -maxdepth 5 -type f | head -100
             exit 1
           fi
+
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found Android project at: $PROJECT_DIR"
+
+          echo "Android project found at:"
+          echo "$PROJECT_DIR"
+
+      - name: Configure JVM 17
+        run: |
+          APP_GRADLE=$(find "$PROJECT_DIR" -path "*/app/build.gradle" | head -n 1)
+
+          if [ -z "$APP_GRADLE" ]; then
+            echo "app/build.gradle not found"
+            find "$PROJECT_DIR" -type f
+            exit 1
+          fi
+
+          cat >> "$APP_GRADLE" <<'EOF'
+
+          tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          echo "Updated:"
+          cat "$APP_GRADLE"
 
       - name: Build APK
         run: |
@@ -71,17 +104,4 @@ jobs:
 
       - name: Find APK
         run: |
-          APK=$(find "$PROJECT_DIR" -type f -name "app-debug.apk" | head -n 1)
-          if [ -z "$APK" ]; then
-            echo "APK not found"
-            find "$PROJECT_DIR" -type f | tail -100
-            exit 1
-          fi
-          echo "Found APK: $APK"
-          cp "$APK" ChatTranslate.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChatTranslate-debug
-          path: ChatTranslate.apk
+          APK=$(find "$PROJECT_DIR" -type f -name "app-debug.apk" | head
