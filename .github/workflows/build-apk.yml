@@ -31,16 +31,12 @@ jobs:
 
           if [ -z "$SETTINGS_FILE" ]; then
             echo "Android project not found"
-            find project -maxdepth 4 -type f | head -100
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Android project found at:"
-          echo "$PROJECT_DIR"
+          echo "Android project: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -50,8 +46,6 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          cmdline-tools-version: '12266719'
 
       - name: Install Android SDK
         run: |
@@ -63,50 +57,44 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Configure AndroidX and JVM
+      - name: Configure AndroidX
         run: |
           echo "android.useAndroidX=true" >> "$PROJECT_DIR/gradle.properties"
           echo "android.enableJetifier=true" >> "$PROJECT_DIR/gradle.properties"
 
+      - name: Configure Java and Kotlin
+        run: |
           APP_GRADLE=$(find "$PROJECT_DIR" -type f -path "*/app/build.gradle" | head -n 1)
 
           if [ -z "$APP_GRADLE" ]; then
-            APP_GRADLE=$(find "$PROJECT_DIR" -type f -path "*/app/build.gradle.kts" | head -n 1)
+            echo "app/build.gradle not found"
+            exit 1
           fi
 
-          echo "APP_GRADLE=$APP_GRADLE"
+          echo "Using: $APP_GRADLE"
 
-          if grep -q "android {" "$APP_GRADLE"; then
-            cat >> "$APP_GRADLE" <<'EOF'
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-}
-
-android {
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-}
-EOF
-          fi
+          printf '%s\n' \
+          'tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {' \
+          '    kotlinOptions.jvmTarget = "1.8"' \
+          '}' \
+          >> "$APP_GRADLE"
 
       - name: Fix OkHttp imports
         run: |
           IME_FILE=$(find "$PROJECT_DIR" -type f -name "TranslateIME.kt" | head -n 1)
 
-          if [ -n "$IME_FILE" ]; then
-            sed -i '/import okhttp3.MediaType.Companion.toMediaType/d' "$IME_FILE"
-            sed -i '/import okhttp3.RequestBody.Companion.toRequestBody/d' "$IME_FILE"
-
-            sed -i '/import okhttp3.OkHttpClient/a import okhttp3.MediaType.Companion.toMediaType\nimport okhttp3.RequestBody.Companion.toRequestBody' "$IME_FILE"
-
-            echo "Fixed imports in:"
-            echo "$IME_FILE"
+          if [ -z "$IME_FILE" ]; then
+            echo "TranslateIME.kt not found"
+            exit 1
           fi
+
+          echo "Using: $IME_FILE"
+
+          sed -i '/import okhttp3.MediaType.Companion.toMediaType/d' "$IME_FILE"
+          sed -i '/import okhttp3.RequestBody.Companion.toRequestBody/d' "$IME_FILE"
+
+          sed -i '/import okhttp3.OkHttpClient/a import okhttp3.MediaType.Companion.toMediaType' "$IME_FILE"
+          sed -i '/import okhttp3.MediaType.Companion.toMediaType/a import okhttp3.RequestBody.Companion.toRequestBody' "$IME_FILE"
 
       - name: Build APK
         run: |
@@ -121,10 +109,11 @@ EOF
             exit 1
           fi
 
-          echo "APK found at:"
-          echo "$APK"
-
+          echo "APK found: $APK"
           echo "APK_PATH=$APK" >> "$GITHUB_ENV"
 
       - name: Upload APK
-        uses:
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatTranslate-debug
+          path: ${{ env.APK_PATH }}
